@@ -3,7 +3,6 @@ from pyspark.sql.functions import regexp_extract, to_timestamp, col, when, lengt
 from pyspark.sql.types import TimestampType, StringType, IntegerType
 import logging
 from typing import Optional, List
-from helper import SparkSessionBuilder
 
 class LogDataCleaner:
     """
@@ -138,18 +137,3 @@ class LogDataCleaner:
         logging.info(f"Found {invalid_timestamps} invalid timestamps")
         logging.info(f"Found {invalid_status} invalid status codes")
 
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    
-    input_path = "/data/logfiles.log"
-    output_path = "/data/cleaned_logs/"
-    partition_by = ["year", "month"]
-    
-    spark = SparkSessionBuilder.create()
-    cleaner = LogDataCleaner(spark)
-    
-    try:
-        cleaner.parse_logs(input_path, output_path, partition_by)
-    finally:
-        spark.stop()
