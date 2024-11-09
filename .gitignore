@@ -1,0 +1,6 @@
+# data generator
+./data/generate_logs.py
+
+# __pycache__ 
+__pycache__/
+*.pyc
