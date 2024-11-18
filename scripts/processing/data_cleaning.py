@@ -1,139 +1,138 @@
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import regexp_extract, to_timestamp, col, when, length, year, month
+import geoip2.database
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.functions import (
+    regexp_extract, to_timestamp, col, when, length, 
+    year, month, udf, split
+)
 from pyspark.sql.types import TimestampType, StringType, IntegerType
 import logging
 from typing import Optional, List
 
 class LogDataCleaner:
-    """
-    Class to handle parsing and cleaning of log data.
-    """
-    def __init__(self, spark: SparkSession) -> None:
+    def __init__(self, spark: SparkSession, geoip_db_path: str):
         self.spark = spark
-    
-    def parse_logs(self, input_path: str, output_path: str, partition_by: Optional[List[str]] = None) -> DataFrame:
+        self.geoip_db_path = geoip_db_path
+
+    def parse_logs_from_stream(self, logs_df: DataFrame, output_path: str, checkpoint_path: str, 
+                             partition_by: Optional[List[str]] = None) -> None:
         """
-        Parse and clean log files using Spark.
+        Parse and clean log lines from streaming DataFrame.
         
         Args:
-            input_path (str): Path to input log files.
-            output_path (str): Path to write cleaned parquet files.
-            partition_by (Optional[List[str]]): Optional columns to partition the output by.
-        
-        Returns:
-            DataFrame: Final cleaned DataFrame.
+            logs_df (DataFrame): Raw streaming DataFrame from Kafka
+            output_path (str): Path to write the processed data
+            checkpoint_path (str): Path for streaming checkpoints
+            partition_by (Optional[List[str]]): Columns to partition by
         """
-        # following the apache log pattern "https://httpd.apache.org/docs/2.4/logs.html#accesslog"
         log_pattern = r'(\S+) - - \[(.*?)\] "(.*?)" (\d{3}) (\d+|-) "(.*?)" "(.*?)" (\d+|-)'
+
+        parsed_df = logs_df.select(
+            regexp_extract('log_line', log_pattern, 1).alias('ip_address'),
+            regexp_extract('log_line', log_pattern, 2).alias('timestamp_raw'),
+            regexp_extract('log_line', log_pattern, 3).alias('request'),
+            regexp_extract('log_line', log_pattern, 4).alias('status_code'),
+            regexp_extract('log_line', log_pattern, 5).alias('response_size'),
+            regexp_extract('log_line', log_pattern, 6).alias('referrer'),
+            regexp_extract('log_line', log_pattern, 7).alias('user_agent'),
+            regexp_extract('log_line', log_pattern, 8).alias('response_time')
+        )
+
+        processed_df = self._process_streaming_data(parsed_df)
         
-        df = self.spark.read.text(input_path)
-        
-        parsed_df = df.select(
-            regexp_extract('value', log_pattern, 1).alias('ip_address'),
-            regexp_extract('value', log_pattern, 2).alias('timestamp_raw'),
-            regexp_extract('value', log_pattern, 3).alias('request'),
-            regexp_extract('value', log_pattern, 4).alias('status_code'),
-            regexp_extract('value', log_pattern, 5).alias('response_size'),
-            regexp_extract('value', log_pattern, 6).alias('referrer'),
-            regexp_extract('value', log_pattern, 7).alias('user_agent'),
-            regexp_extract('value', log_pattern, 8).alias('response_time')
+        streaming_query = self._write_streaming_output(
+            processed_df, 
+            output_path, 
+            checkpoint_path,
+            partition_by
         )
         
-        cleaned_df = self._clean_columns(parsed_df)
-        final_df = self._enhance_dataframe(cleaned_df, partition_by)
+        return streaming_query
 
-        # showing the first 3 to check
-        final_df.show(3, truncate=False)
-        
-        self._write_output(final_df, output_path, partition_by)
-        self._log_summary(final_df)
-
-        return final_df
-    
-    def _clean_columns(self, df: DataFrame) -> DataFrame:
-        """
-        Clean and cast columns to appropriate data types.
-        
-        Args:
-            df (DataFrame): Parsed DataFrame.
-        
-        Returns:
-            DataFrame: Cleaned DataFrame with appropriate column types.
-        """
-        return df \
+    def _process_streaming_data(self, df: DataFrame) -> DataFrame:
+        """Process the streaming DataFrame through all transformations."""
+        # Clean columns
+        cleaned_df = df \
             .withColumn('timestamp', 
-                        when(length(col('timestamp_raw')) > 0,
-                             to_timestamp(col('timestamp_raw'), 'dd/MMM/yyyy:HH:mm:ss Z'))
-                        .otherwise(None).cast(TimestampType())) \
+                when(length(col('timestamp_raw')) > 0,
+                     to_timestamp(col('timestamp_raw'), 'dd/MMM/yyyy:HH:mm:ss Z'))
+                .otherwise(None).cast(TimestampType())) \
             .withColumn('status_code',
-                        when(col('status_code').rlike(r'^\d{3}$'),
-                             col('status_code').cast(IntegerType()))
-                        .otherwise(None)) \
+                when(col('status_code').rlike(r'^\d{3}$'),
+                     col('status_code').cast(IntegerType()))
+                .otherwise(None)) \
             .withColumn('response_size',
-                        when(col('response_size').rlike(r'^\d+$'),
-                             col('response_size').cast(IntegerType()))
-                        .otherwise(0)) \
+                when(col('response_size').rlike(r'^\d+$'),
+                     col('response_size').cast(IntegerType()))
+                .otherwise(0)) \
             .withColumn('response_time',
-                        when(col('response_time').rlike(r'^\d+$'),
-                             col('response_time').cast(IntegerType()))
-                        .otherwise(0))
+                when(col('response_time').rlike(r'^\d+$'),
+                     col('response_time').cast(IntegerType()))
+                .otherwise(0))
 
-    def _enhance_dataframe(self, df: DataFrame, partition_by: Optional[List[str]]) -> DataFrame:
-        """
-        Enhance the DataFrame with additional columns for analysis and partitioning.
-        
-        Args:
-            df (DataFrame): Cleaned DataFrame.
-            partition_by (Optional[List[str]]): Columns to partition the output by.
-        
-        Returns:
-            DataFrame: Enhanced DataFrame.
-        """
-        return df \
+        enhanced_df = cleaned_df \
             .withColumn("method", 
-                        when(length(col("request")) > 0,
-                             regexp_extract(col("request"), r"^(\S+)", 1))
-                        .otherwise(None)) \
+                when(length(col("request")) > 0,
+                     regexp_extract(col("request"), r"^(\S+)", 1))
+                .otherwise(None)) \
             .withColumn("endpoint",
-                        when(length(col("request")) > 0,
-                             regexp_extract(col("request"), r"^\S+\s(\S+)", 1))
-                        .otherwise(None)) \
+                when(length(col("request")) > 0,
+                     regexp_extract(col("request"), r"^\S+\s(\S+)", 1))
+                .otherwise(None)) \
             .withColumn("protocol",
-                        when(length(col("request")) > 0,
-                             regexp_extract(col("request"), r"(\S+)$", 1))
-                        .otherwise(None)) \
+                when(length(col("request")) > 0,
+                     regexp_extract(col("request"), r"(\S+)$", 1))
+                .otherwise(None)) \
             .drop("request", "timestamp_raw") \
             .withColumn("year", year(col("timestamp"))) \
             .withColumn("month", month(col("timestamp"))) \
             .withColumn("is_valid_timestamp", col("timestamp").isNotNull()) \
             .withColumn("is_valid_status", col("status_code").isNotNull())
 
-    def _write_output(self, df: DataFrame, output_path: str, partition_by: Optional[List[str]]) -> None:
-        """
-        Write the final DataFrame to the specified output path.
+        geoip_db_path = self.geoip_db_path
+
+        def get_geo_info(ip_address: str) -> str:
+            if not ip_address:
+                return "Unknown|Unknown|Unknown"
+                
+            try:
+                with geoip2.database.Reader(geoip_db_path) as reader:
+                    response = reader.city(ip_address)
+                    country = response.country.name or "Unknown"
+                    city = response.city.name or "Unknown"
+                    region = response.subdivisions.most_specific.name if response.subdivisions else "Unknown"
+                    return f"{country}|{city}|{region}"
+            except Exception as e:
+                logging.error(f"GeoIP error for IP {ip_address}: {str(e)}")
+                return "Unknown|Unknown|Unknown"
+
+        geo_udf = udf(get_geo_info, StringType())
         
-        Args:
-            df (DataFrame): Final DataFrame to write.
-            output_path (str): Output path for the parquet files.
-            partition_by (Optional[List[str]]): Columns to partition the output by.
-        """
-        writer = df.write.mode("overwrite")
+        enriched_df = enhanced_df \
+            .withColumn("geo_info", geo_udf("ip_address")) \
+            .withColumn("geo_parts", split(col("geo_info"), "\\|")) \
+            .withColumn("country", col("geo_parts").getItem(0)) \
+            .withColumn("city", col("geo_parts").getItem(1)) \
+            .withColumn("region", col("geo_parts").getItem(2)) \
+            .drop("geo_info", "geo_parts")
+
+        return enriched_df
+
+    def _write_streaming_output(
+        self, 
+        df: DataFrame, 
+        output_path: str, 
+        checkpoint_path: str,
+        partition_by: Optional[List[str]] = None
+    ):
+        """Write streaming DataFrame to output."""
+        
+        writer = df.writeStream \
+            .outputMode("append") \
+            .option("checkpointLocation", checkpoint_path)
+        
         if partition_by:
             writer = writer.partitionBy(*partition_by)
-        writer.parquet(output_path)
-
-    def _log_summary(self, df: DataFrame) -> None:
-        """
-        Log summary statistics of the DataFrame.
         
-        Args:
-            df (DataFrame): Final DataFrame for logging.
-        """
-        row_count = df.count()
-        invalid_timestamps = df.filter(~col("is_valid_timestamp")).count()
-        invalid_status = df.filter(~col("is_valid_status")).count()
-        
-        logging.info(f"Processed {row_count} log entries")
-        logging.info(f"Found {invalid_timestamps} invalid timestamps")
-        logging.info(f"Found {invalid_status} invalid status codes")
-
+        return writer \
+            .format("parquet") \
+            .start(output_path)
