@@ -4,3 +4,13 @@ data/generate_logs.py
 # __pycache__ 
 __pycache__/
 *.pyc
+
+# docker
+docker/
+docker-compose.yml
+
+# env 
+server-analysis-env/
+
+# geo lite information
+GeoLite_data/GeoLite2-City.mmdb
