@@ -13,4 +13,5 @@ docker-compose.yml
 server-analysis-env/
 
 # geo lite information
+GeoLite_data/
 GeoLite_data/GeoLite2-City.mmdb
