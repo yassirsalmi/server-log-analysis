@@ -72,7 +72,7 @@ This script will:
   - `main.py`: Main entry point
   - `kafka_producer.py`: Kafka log producer
 - `processing/`: Data cleaning modules
-- `analysis/`: Log analytics and anomaly detection
+- `analysis/`: Log analytics 
 - `helper/`: Utility functions
 - `web/`: Web interface components
 - `data/`: Processed log data storage
