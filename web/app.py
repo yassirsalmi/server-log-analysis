@@ -1,8 +1,15 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from datetime import datetime, timedelta
 import json
+import sys
+import os
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
+from scripts.analysis.web_log_anomaly_detection import WebLogAnomalyDetector
 
 app = Flask(__name__, template_folder = "template")
 
@@ -17,7 +24,7 @@ def dashboard():
     """Render the main dashboard page"""
     return render_template('index.html')
 
-@app.route('/api/stats/overview')
+@app.route('/analysis/stats/overview')
 def get_overview_stats():
     """Get overview statistics"""
     try:
@@ -42,7 +49,7 @@ def get_overview_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/stats/hourly')
+@app.route('/analysis/stats/hourly')
 def get_hourly_stats():
     """Get hourly request distribution"""
     try:
@@ -63,7 +70,7 @@ def get_hourly_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/stats/status')
+@app.route('/analysis/stats/status')
 def get_status_stats():
     """Get status code distribution"""
     try:
@@ -78,7 +85,7 @@ def get_status_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/stats/top_endpoints')
+@app.route('/analysis/stats/top_endpoints')
 def get_top_endpoints():
     """Get top requested endpoints"""
     try:
@@ -100,6 +107,24 @@ def get_top_endpoints():
         } for row in top_endpoints])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/analysis/anomalies')
+def detect_anomalies():
+    """Detect and return log anomalies using cleaned logs"""
+    try:
+        df = spark.read.parquet(CLEANED_LOGS_PATH)
+
+        anomaly_detector = WebLogAnomalyDetector(spark_df=df)
+
+        anomalies = anomaly_detector.detect_anomalies()
+
+        return jsonify({
+            "total_anomalies": len(anomalies),
+            "anomalies": anomalies
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
