@@ -8,6 +8,13 @@ This project is a comprehensive server log analysis system that leverages Apache
 - Log data cleaning and validation
 - Geolocation enrichment
 - processing with Apache Spark
+- Log Parsing and Cleaning
+- Server Log Analysis Dashboard
+- **Web Log Anomaly Detection**
+  - Detects suspicious status codes
+  - Identifies unusual HTTP methods
+  - Tracks high-traffic IP addresses
+  - Monitors suspicious user agents
 
 ## Prerequisites
 - Python 3.8+
@@ -66,6 +73,38 @@ This script will:
 - Launch Kafka producer
 - Start main log processing
 - Initialize web application
+
+## Anomaly Detection API
+
+The `/analysis/anomalies` endpoint provides a comprehensive log anomaly detection service:
+
+### Endpoint: `/analysis/anomalies`
+
+**Query Parameters:**
+- `log_path` (optional): Path to the log file. Defaults to project's default log file.
+
+**Response Example:**
+```json
+{
+  "total_anomalies": 5,
+  "anomalies": [
+    {
+      "type": "Suspicious Status Code",
+      "ip": "192.168.1.100",
+      "status_code": 403,
+      "endpoint": "/admin",
+      "timestamp": "2024-01-15T10:30:45+00:00"
+    },
+    ...
+  ]
+}
+```
+
+### Anomaly Types
+- Suspicious Status Codes (401, 403, 500, etc.)
+- Unusual HTTP Methods (DELETE, PUT)
+- High Request Rate per IP
+- Suspicious User Agents
 
 ## Project Structure
 - `scripts/`: Core processing scripts
