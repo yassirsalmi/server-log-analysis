@@ -10,8 +10,7 @@ import os
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
-from scripts.analysis.web_log_anomaly_detection import WebLogAnomalyDetector
-from scripts.analysis.anomaly_detection import AnomalyDetection
+from scripts.analysis.anomaly_detection import AnomalyDetector
 
 app = Flask(__name__, template_folder = "template")
 
@@ -42,7 +41,7 @@ def start_streaming_job():
             .select("data.*")
 
         # Process the parsed DataFrame to detect anomalies
-        anomaly_detector = AnomalyDetection(spark, parsed_df)
+        anomaly_detector = AnomalyDetector(spark, parsed_df)
         processed_df = anomaly_detector.detect_log_anomalies()
 
         global streaming_query
@@ -148,26 +147,25 @@ def detect_anomalies():
     """Detect and return log anomalies using cleaned logs"""
     try:
         df = spark.read.parquet(CLEANED_LOGS_PATH)
-
-        anomaly_detector = WebLogAnomalyDetector(spark_df=df)
-
-        anomalies = anomaly_detector.detect_anomalies()
-
+        
+        anomaly_detector = AnomalyDetector(spark_df=df)
+        
+        anomalies_result = anomaly_detector.detect_log_anomalies()
+        
+        if isinstance(anomalies_result, spark.sql.dataframe.DataFrame):
+            anomalies = anomalies_result.toPandas().to_dict(orient="records")
+            total_anomalies = len(anomalies)
+        elif isinstance(anomalies_result, dict):
+            anomalies = anomalies_result
+            total_anomalies = sum(len(v) for v in anomalies.values() if isinstance(v, list))
+        else:
+            raise TypeError("Unsupported return type from detect_log_anomalies: "
+                            f"{type(anomalies_result)}")
+        
         return jsonify({
-            "total_anomalies": len(anomalies),
+            "total_anomalies": total_anomalies,
             "anomalies": anomalies
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/anomalies')
-def show_anomalies():
-    """Display anomalies detected by the AnomalyDetection class"""
-    try:
-        df = spark.read.parquet(CLEANED_LOGS_PATH)
-        anomaly_detector = AnomalyDetection(spark, df)
-        anomalies = anomaly_detector.detect_log_anomalies()
-        return render_template('anomalies.html', anomalies=anomalies)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

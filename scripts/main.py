@@ -2,7 +2,7 @@ import logging
 from helper.helper import SparkSessionBuilder
 from processing.data_cleaning import LogDataCleaner
 from analysis.analytics import LogAnalytics
-from analysis.anomaly_detection import AnomalyDetection
+from analysis.anomaly_detection import AnomalyDetector
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType, IntegerType
 import os
 from pyspark.sql.functions import col
@@ -82,7 +82,7 @@ def main():
             if batch_df is not None and not batch_df.isEmpty():
                 try:
                     log_analytics = LogAnalytics(spark, batch_df)
-                    anomaly_detection = AnomalyDetection(spark, batch_df)
+                    anomaly_detection = AnomalyDetector(spark, batch_df)
 
                     logging.info("Performing descriptive statistics...")
                     stats = log_analytics.descriptive_stats()
