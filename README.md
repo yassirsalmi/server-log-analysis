@@ -16,6 +16,24 @@ This project is a comprehensive server log analysis system that leverages Apache
   - Tracks high-traffic IP addresses
   - Monitors suspicious user agents
 
+  ## Project Structure
+- `scripts/`: Core processing scripts
+  - `main.py`: Main entry point
+  - `kafka_producer.py`: Kafka log producer
+  - `processing/`: Data cleaning modules
+  - `analysis/`: Log analytics 
+  - `helper/`: Utility functions
+- `web/`: Web interface components
+- `data/`: Processed log data storage
+- `GeoLite_data/`: Geolocation database
+
+## Key Technologies
+- Apache Spark
+- Apache Kafka
+- Python
+- Geolocation Analysis
+- Streaming Data Processing
+
 ## Prerequisites
 - Python 3.8+
 - Java 8 or higher
@@ -105,21 +123,3 @@ The `/analysis/anomalies` endpoint provides a comprehensive log anomaly detectio
 - Unusual HTTP Methods (DELETE, PUT)
 - High Request Rate per IP
 - Suspicious User Agents
-
-## Project Structure
-- `scripts/`: Core processing scripts
-  - `main.py`: Main entry point
-  - `kafka_producer.py`: Kafka log producer
-- `processing/`: Data cleaning modules
-- `analysis/`: Log analytics 
-- `helper/`: Utility functions
-- `web/`: Web interface components
-- `data/`: Processed log data storage
-- `GeoLite_data/`: Geolocation database
-
-## Key Technologies
-- Apache Spark
-- Apache Kafka
-- Python
-- Geolocation Analysis
-- Streaming Data Processing
