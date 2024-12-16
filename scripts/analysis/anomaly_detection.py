@@ -4,16 +4,25 @@ from pyspark.ml.feature import StandardScaler, VectorAssembler
 from pyspark.ml.clustering import KMeans, BisectingKMeans
 from pyspark.ml.stat import Summarizer
 from pyspark.ml.feature import StringIndexer, OneHotEncoder
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, TimestampType
-from analysis.web_log_anomaly_detection import WebLogAnomalyDetector
+from pyspark.sql.types import (
+    StructType, StructField, StringType,
+    IntegerType, DoubleType, TimestampType
+)
+from .web_log_anomaly_detection import WebLogAnomalyDetector
 import os
 import logging
+import pandas as pd
+from datetime import datetime
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s: %(message)s'
+)
+
 logger = logging.getLogger(__name__)
 
 class AnomalyDetection:
-    def __init__(self, spark_session, df):
+    def _init_(self, spark_session, df):
         self.spark = spark_session
         self.df = df
 
@@ -34,7 +43,7 @@ class AnomalyDetection:
                                   F.max("timestamp").alias("last_seen")
                               )
 
-    def z_score_detection(self, threshold=3):
+    def z_score_detection(self, threshold=2):  # Lowered threshold from 3 to 2
         """
         Detect anomalies using enhanced Z-score method.
         
@@ -61,7 +70,7 @@ class AnomalyDetection:
             logger.error(f"Error in Z-score detection: {str(e)}")
             raise
 
-    def time_series_anomaly_detection(self, window_size=3, threshold=2):
+    def time_series_anomaly_detection(self, window_size=2, threshold=1.5):  # Adjusted window size and threshold
         """
         Detect time series anomalies using rolling window statistics.
         
@@ -92,7 +101,7 @@ class AnomalyDetection:
             logger.error(f"Error in time series anomaly detection: {str(e)}")
             raise
 
-    def statistical_outlier_detection(self, columns=["request_count", "response_time"], method="iqr"):
+    def statistical_outlier_detection(self, columns=["request_count", "response_time"], method="zscore"):
         """
         Detect statistical outliers using IQR or Z-score method.
         
@@ -116,7 +125,7 @@ class AnomalyDetection:
                     ).otherwise(0)
                 )
             
-            def detect_zscore_outliers(df, column, threshold=3):
+            def detect_zscore_outliers(df, column, threshold=2):  # Lowered threshold in Z-score method
                 mean = F.mean(column)
                 std = F.stddev(column)
                 
@@ -177,7 +186,53 @@ class AnomalyDetection:
             F.when(F.col("anomaly_cluster") == smallest_cluster_index, 1).otherwise(0)
         ).select("*", "is_anomaly")
 
-def detect_log_anomalies(spark_session):
+    def detect_log_anomalies(self):
+        """
+        Comprehensive log anomaly detection combining Spark and Pandas methods.
+        
+        Returns:
+        dict: Dictionary containing anomalies detected by Spark and Pandas methods.
+        """
+        try:
+            # Detect anomalies using Spark methods
+            z_score_anomalies = self.z_score_detection()
+            time_series_anomalies = self.time_series_anomaly_detection()
+            statistical_anomalies = self.statistical_outlier_detection()
+
+            # Combine Spark-based anomalies
+            combined_anomalies_spark = z_score_anomalies.join(
+                time_series_anomalies, ["ip_address", "endpoint"]
+            ).join(
+                statistical_anomalies, ["ip_address", "endpoint"]
+            )
+
+            anomalies_spark = combined_anomalies_spark.filter(
+                (F.col("anomaly") == 1) |
+                (F.col("time_series_anomaly") == 1) |
+                (F.col("request_count_outlier") == 1) |
+                (F.col("response_time_outlier") == 1)
+            ).select("ip_address", "endpoint", "timestamp").collect()
+
+            # Convert Spark DataFrame to Pandas DataFrame
+            logs_pd_df = self.df.toPandas()
+
+            # Use methods from WebLogAnomalyDetector
+            web_log_detector = WebLogAnomalyDetector(logs_pd_df)
+            web_anomalies = web_log_detector.detect_anomalies()
+
+            # Merge Spark anomalies with web anomalies
+            combined_anomalies = {
+                'spark_anomalies': [row.asDict() for row in anomalies_spark],
+                'web_anomalies': web_anomalies
+            }
+
+            logger.info("Anomaly detection completed successfully.")
+            return combined_anomalies
+        except Exception as e:
+            logger.error(f"Error in detecting anomalies: {str(e)}")
+            return {"error": str(e)}
+
+def detect_log_anomalies(spark_session, parsed_df):
     """
     Comprehensive log anomaly detection pipeline.
     
@@ -187,6 +242,7 @@ def detect_log_anomalies(spark_session):
     DEFAULT_LOG_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'server_logs', 'logfiles.log')
     
     try:
+        # Define the schema for the incoming data
         log_schema = StructType([
             StructField("timestamp", TimestampType(), True),
             StructField("ip_address", StringType(), True),
@@ -195,8 +251,9 @@ def detect_log_anomalies(spark_session):
             StructField("response_time", DoubleType(), True)
         ])
         
-        logs_df = spark_session.read.csv(DEFAULT_LOG_PATH, schema=log_schema, header=True)
-        
+        # Ensure parsed_df has the correct schema
+        logs_df = parsed_df
+
         anomaly_detector = AnomalyDetection(spark_session, logs_df)
         
         z_score_anomalies = anomaly_detector.z_score_detection()
@@ -212,6 +269,12 @@ def detect_log_anomalies(spark_session):
             (F.col("request_count_outlier") == 1)
         ).collect()
         
+        query = combined_anomalies.writeStream \
+            .format("parquet") \
+            .option("path", "/path/to/output") \
+            .option("checkpointLocation", "/tmp/checkpoints/anomaly_detection") \
+            .start()
+        
         logger.info(f"Total anomalies detected: {len(anomalies)}")
         return anomalies
     
@@ -221,3 +284,4 @@ def detect_log_anomalies(spark_session):
     except Exception as e:
         logger.error(f"Unexpected error during anomaly detection: {str(e)}")
         return [{"error": str(e)}]
+    
