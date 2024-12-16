@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, render_template, request
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.types import StructType, StructField, TimestampType, StringType, IntegerType, DoubleType
 from datetime import datetime, timedelta
 import json
 import sys
@@ -10,12 +11,46 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from scripts.analysis.web_log_anomaly_detection import WebLogAnomalyDetector
+from scripts.analysis.anomaly_detection import AnomalyDetection
 
 app = Flask(__name__, template_folder = "template")
 
 spark = SparkSession.builder \
     .appName("Log Analysis Dashboard") \
     .getOrCreate()
+
+def start_streaming_job():
+    if 'streaming_query' not in globals():
+        logs_df = spark.readStream \
+            .format("kafka") \
+            .option("kafka.bootstrap.servers", "localhost:9092") \
+            .option("subscribe", "server_logs") \
+            .load()
+
+        # Define the schema for the incoming Kafka data
+        log_schema = StructType([
+            StructField("timestamp", TimestampType(), True),
+            StructField("ip_address", StringType(), True),
+            StructField("endpoint", StringType(), True),
+            StructField("request_count", IntegerType(), True),
+            StructField("response_time", DoubleType(), True)
+        ])
+
+        # Parse the Kafka JSON messages into a structured DataFrame
+        parsed_df = logs_df.selectExpr("CAST(value AS STRING) as json") \
+            .select(F.from_json("json", log_schema).alias("data")) \
+            .select("data.*")
+
+        # Process the parsed DataFrame to detect anomalies
+        anomaly_detector = AnomalyDetection(spark, parsed_df)
+        processed_df = anomaly_detector.detect_log_anomalies()
+
+        global streaming_query
+        streaming_query = processed_df.writeStream \
+            .format("memory") \
+            .queryName("anomalies") \
+            .option("checkpointLocation", "/tmp/checkpoints/app_streaming") \
+            .start()
 
 CLEANED_LOGS_PATH = "/data/cleaned_logs/"
 
@@ -125,6 +160,16 @@ def detect_anomalies():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/anomalies')
+def show_anomalies():
+    """Display anomalies detected by the AnomalyDetection class"""
+    try:
+        df = spark.read.parquet(CLEANED_LOGS_PATH)
+        anomaly_detector = AnomalyDetection(spark, df)
+        anomalies = anomaly_detector.detect_log_anomalies()
+        return render_template('anomalies.html', anomalies=anomalies)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

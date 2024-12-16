@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Anomalies Detected</title>
+</head>
+<body>
+    <h1>Anomalies Detected</h1>
+    <h2>Spark Anomalies</h2>
+    <table>
+        <tr>
+            <th>IP Address</th>
+            <th>Endpoint</th>
+            <th>Anomaly Type</th>
+        </tr>
+        {% for anomaly in anomalies['spark_anomalies'] %}
+        <tr>
+            <td>{{ anomaly.ip_address }}</td>
+            <td>{{ anomaly.endpoint }}</td>
+            <td>{{ anomaly.anomaly_type }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <h2>Web Anomalies</h2>
+    <table>
+        <tr>
+            <th>Type</th>
+            <th>Details</th>
+        </tr>
+        {% for category, anomaly_list in anomalies['web_anomalies'].items() %}
+            {% for anomaly in anomaly_list %}
+            <tr>
+                <td>{{ anomaly['type'] }}</td>
+                <td>{{ anomaly }}</td>
+            </tr>
+            {% endfor %}
+        {% endfor %}
+    </table>
+</body>
+</html>

@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime
 import json
 import os
+import re
 
 class WebLogAnomalyDetector:
     def __init__(self, spark_df=None, log_file_path=None):
@@ -20,7 +21,7 @@ class WebLogAnomalyDetector:
             'suspicious_status_codes': [401, 403, 500, 502, 503],
             'suspicious_http_methods': ['DELETE', 'PUT'],
             'max_requests_per_ip': 100,
-            'max_request_time_ms': 5000,
+            'max_response_time_ms': 5000,
             'unusual_user_agents': ['sqlmap', 'nikto', 'nmap'],
             'geoblocking_countries': [] 
         }
@@ -32,7 +33,15 @@ class WebLogAnomalyDetector:
         if self.spark_df is None:
             raise ValueError("No Spark DataFrame provided")
         
-        self.logs_df = self.spark_df.toPandas()
+        logs_pdf = self.spark_df.toPandas()
+        
+        column_mapping = {
+            'ip_address': 'ip',
+        }
+        
+        logs_pdf = logs_pdf.rename(columns=column_mapping)
+        
+        self.logs_df = logs_pdf
         return self.logs_df
     
     def detect_anomalies(self):
@@ -44,7 +53,9 @@ class WebLogAnomalyDetector:
         """
         if self.logs_df is None:
             if self.spark_df is not None:
+                print("Spark DataFrame columns:", self.spark_df.columns)
                 self.parse_spark_logs()
+                print("Parsed DataFrame columns:", self.logs_df.columns)
             elif self.log_file_path:
                 self.parse_logs()
             else:
@@ -88,11 +99,10 @@ class WebLogAnomalyDetector:
             dict: Parsed log entry or None if parsing fails
         """
         pattern = r'(\S+) \S+ \S+ \[([^\]]+)\] "([^"]*)" (\d+) (\d+) "([^"]*)" "([^"]*)" (\d+)'
-        import re
         match = re.match(pattern, line)
         
         if match:
-            ip, timestamp, request, status_code, response_size, referrer, user_agent, request_time = match.groups()
+            ip, timestamp, request, status_code, response_size, referrer, user_agent, response_time = match.groups()
             
             try:
                 parsed_timestamp = datetime.strptime(timestamp, '%d/%b/%Y:%H:%M:%S %z')
@@ -111,7 +121,7 @@ class WebLogAnomalyDetector:
                 'response_size': int(response_size),
                 'referrer': referrer,
                 'user_agent': user_agent,
-                'request_time': int(request_time)
+                'response_time': int(response_time)
             }
         return None
  
@@ -121,10 +131,10 @@ class WebLogAnomalyDetector:
         ]
         return [{
             'type': 'Suspicious Status Code',
-            'ip': row['ip'],
+            'ip': row.get('ip') or row.get('ip_address', 'Unknown'),
             'status_code': row['status_code'],
             'endpoint': row['endpoint'],
-            'timestamp': row['timestamp'].isoformat() if row['timestamp'] else 'Unknown'
+            'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
         } for _, row in suspicious_status_logs.iterrows()]
 
     def detect_method_anomalies(self):
@@ -133,10 +143,10 @@ class WebLogAnomalyDetector:
         ]
         return [{
             'type': 'Suspicious HTTP Method',
-            'ip': row['ip'],
+            'ip': row.get('ip') or row.get('ip_address', 'Unknown'),
             'method': row['method'],
             'endpoint': row['endpoint'],
-            'timestamp': row['timestamp'].isoformat() if row['timestamp'] else 'Unknown'
+            'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
         } for _, row in suspicious_method_logs.iterrows()]
 
     def detect_user_agent_anomalies(self):
@@ -145,14 +155,15 @@ class WebLogAnomalyDetector:
         ]
         return [{
             'type': 'Unusual User Agent',
-            'ip': row['ip'],
+            'ip': row.get('ip') or row.get('ip_address', 'Unknown'),
             'user_agent': row['user_agent'],
             'endpoint': row['endpoint'],
-            'timestamp': row['timestamp'].isoformat() if row['timestamp'] else 'Unknown'
+            'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
         } for _, row in unusual_ua_logs.iterrows()]
 
     def detect_ip_anomalies(self):
-        ip_request_counts = self.logs_df['ip'].value_counts()
+        ip_column = 'ip' if 'ip' in self.logs_df.columns else 'ip_address'
+        ip_request_counts = self.logs_df[ip_column].value_counts()
         high_traffic_ips = ip_request_counts[ip_request_counts > self.config['max_requests_per_ip']]
         return [{
             'type': 'High Request Rate',
@@ -164,14 +175,14 @@ class WebLogAnomalyDetector:
     def detect_performance_anomalies(self):
         performance_anomalies = []
         
-        slow_requests = self.logs_df[self.logs_df['request_time'] > self.config['max_request_time_ms']]
+        slow_requests = self.logs_df[self.logs_df['response_time'] > self.config['max_response_time_ms']]
         
         if not slow_requests.empty:
             performance_anomalies.append({
                 'type': 'slow_requests',
                 'count': len(slow_requests),
-                'avg_request_time': slow_requests['request_time'].mean(),
-                'max_request_time': slow_requests['request_time'].max()
+                'avg_response_time': slow_requests['response_time'].mean(),
+                'max_response_time': slow_requests['response_time'].max()
             })
         
         return performance_anomalies
@@ -198,4 +209,3 @@ class WebLogAnomalyDetector:
             })
         
         return security_anomalies
-    
