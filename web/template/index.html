@@ -214,12 +214,69 @@
                 
                 const tableBody = document.getElementById('anomalies-table');
                 
-                const anomalies = Array.isArray(data.anomalies) ? data.anomalies : 
-                                Array.isArray(data) ? data : [];
-                
-                tableBody.innerHTML = anomalies.length > 0 
-                    ? anomalies.map(anomaly => `...`).join('') 
-                    : `<tr><td colspan="4" class="px-6 py-4 text-center">No anomalies detected</td></tr>`;
+                // Check if anomalies exist and have data
+                if (data.anomalies && Object.keys(data.anomalies).length > 0) {
+                    let anomaliesHTML = '';
+                    
+                    // IP Anomalies
+                    if (data.anomalies.ip_anomalies && data.anomalies.ip_anomalies.length > 0) {
+                        data.anomalies.ip_anomalies.forEach(anomaly => {
+                            anomaliesHTML += `
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">IP Anomaly</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    IP ${anomaly.ip_address} exceeded max requests (${anomaly.request_count} > ${anomaly.max_allowed_requests})
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ${new Date().toLocaleString()}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-red-500">High</td>
+                            </tr>
+                            `;
+                        });
+                    }
+                    
+                    // Performance Anomalies
+                    if (data.anomalies.performance_anomalies && data.anomalies.performance_anomalies.length > 0) {
+                        data.anomalies.performance_anomalies.forEach(anomaly => {
+                            anomaliesHTML += `
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Performance Anomaly</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ${anomaly.count} slow requests detected (Avg: ${anomaly.avg_response_time.toFixed(2)} ms)
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ${new Date().toLocaleString()}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-yellow-500">Medium</td>
+                            </tr>
+                            `;
+                        });
+                    }
+                    
+                    // Security Anomalies
+                    if (data.anomalies.security_anomalies && data.anomalies.security_anomalies.length > 0) {
+                        data.anomalies.security_anomalies.forEach(anomaly => {
+                            anomaliesHTML += `
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Security Anomaly</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    Suspicious user agents detected: ${JSON.stringify(anomaly.details)}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ${new Date().toLocaleString()}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-red-500">Critical</td>
+                            </tr>
+                            `;
+                        });
+                    }
+                    
+                    tableBody.innerHTML = anomaliesHTML || 
+                        `<tr><td colspan="4" class="px-6 py-4 text-center">No anomalies detected</td></tr>`;
+                } else {
+                    tableBody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-center">No anomalies detected</td></tr>`;
+                }
             } catch (error) {
                 console.error('Error fetching anomalies:', error);
                 const tableBody = document.getElementById('anomalies-table');

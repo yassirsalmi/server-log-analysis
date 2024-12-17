@@ -64,7 +64,7 @@ class AnomalyDetector:
                                   F.max("timestamp").alias("last_seen")
                               )
 
-    def z_score_detection(self, threshold=2):
+    def z_score_detection(self, threshold=3):
         """
         Detect anomalies using enhanced Z-score method.
         
@@ -91,7 +91,7 @@ class AnomalyDetector:
             logger.error(f"Error in Z-score detection: {str(e)}")
             raise
 
-    def time_series_anomaly_detection(self, window_size=2, threshold=1.5):
+    def time_series_anomaly_detection(self, window_size=2, threshold=3):
         """
         Detect time series anomalies using rolling window statistics.
         
@@ -147,7 +147,7 @@ class AnomalyDetector:
                     ).otherwise(0)
                 )
             
-            def detect_zscore_outliers(df, column, threshold=2):
+            def detect_zscore_outliers(df, column, threshold=3):
                 mean = F.mean(column)
                 std = F.stddev(column)
                 
@@ -249,27 +249,6 @@ class AnomalyDetector:
             }
         return None
 
-    def detect_status_code_anomalies(self):
-        """
-        Detect anomalies based on suspicious HTTP status codes
-        
-        Returns:
-        list: List of dictionaries with status code anomalies
-        """
-        if self.logs_df is None:
-            self.parse_logs() if self.log_file_path else None
-        
-        suspicious_status_logs = self.logs_df[
-            self.logs_df['status_code'].isin(self.config['suspicious_status_codes'])
-        ]
-        return [{
-            'type': 'Suspicious Status Code',
-            'ip_address': row['ip_address'],
-            'status_code': row['status_code'],
-            'endpoint': row['endpoint'],
-            'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
-        } for _, row in suspicious_status_logs.iterrows()]
-
     def detect_method_anomalies(self):
         """
         Detect anomalies based on suspicious HTTP methods
@@ -290,27 +269,6 @@ class AnomalyDetector:
             'endpoint': row['endpoint'],
             'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
         } for _, row in suspicious_method_logs.iterrows()]
-
-    def detect_user_agent_anomalies(self):
-        """
-        Detect anomalies based on unusual user agents
-        
-        Returns:
-        list: List of dictionaries with user agent anomalies
-        """
-        if self.logs_df is None:
-            self.parse_logs() if self.log_file_path else None
-        
-        unusual_ua_logs = self.logs_df[
-            self.logs_df['user_agent'].str.contains('|'.join(self.config['unusual_user_agents']), case=False, na=False)
-        ]
-        return [{
-            'type': 'Unusual User Agent',
-            'ip_address': row['ip_address'],
-            'user_agent': row['user_agent'],
-            'endpoint': row['endpoint'],
-            'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
-        } for _, row in unusual_ua_logs.iterrows()]
 
     def detect_ip_anomalies(self):
         """
@@ -384,7 +342,6 @@ class AnomalyDetector:
         Comprehensive log anomaly detection combining Spark and Pandas methods.
         """
         try:
-            # If df is a Spark DataFrame, convert to Pandas
             if hasattr(self.df, 'toPandas'):
                 self.logs_df = self.df.toPandas()
             
@@ -392,9 +349,7 @@ class AnomalyDetector:
                 raise ValueError("No log data available for analysis")
             
             anomalies = {
-                'status_code_anomalies': self.detect_status_code_anomalies(),
-                'method_anomalies': self.detect_method_anomalies(),
-                'user_agent_anomalies': self.detect_user_agent_anomalies(),
+                # 'method_anomalies': self.detect_method_anomalies(),
                 'ip_anomalies': self.detect_ip_anomalies(),
                 'performance_anomalies': self.detect_performance_anomalies(),
                 'security_anomalies': self.detect_security_anomalies(),
