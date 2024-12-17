@@ -148,19 +148,15 @@ def detect_anomalies():
     try:
         df = spark.read.parquet(CLEANED_LOGS_PATH)
         
-        anomaly_detector = AnomalyDetector(spark_df=df)
-        
+        anomaly_detector = AnomalyDetector(spark_session=spark, df=df)
+        print("DataFrame Columns:", df.columns)
         anomalies_result = anomaly_detector.detect_log_anomalies()
         
-        if isinstance(anomalies_result, spark.sql.dataframe.DataFrame):
-            anomalies = anomalies_result.toPandas().to_dict(orient="records")
-            total_anomalies = len(anomalies)
-        elif isinstance(anomalies_result, dict):
+        if isinstance(anomalies_result, dict):
             anomalies = anomalies_result
             total_anomalies = sum(len(v) for v in anomalies.values() if isinstance(v, list))
         else:
-            raise TypeError("Unsupported return type from detect_log_anomalies: "
-                            f"{type(anomalies_result)}")
+            raise TypeError("Unsupported return type from detect_log_anomalies")
         
         return jsonify({
             "total_anomalies": total_anomalies,

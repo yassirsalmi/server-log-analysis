@@ -236,7 +236,7 @@ class AnomalyDetector:
             method, endpoint, protocol = request.split() if request else (None, None, None)
             
             return {
-                'ip': ip,
+                'ip_address': ip,
                 'timestamp': parsed_timestamp,
                 'method': method,
                 'endpoint': endpoint,
@@ -264,7 +264,7 @@ class AnomalyDetector:
         ]
         return [{
             'type': 'Suspicious Status Code',
-            'ip': row.get('ip', 'Unknown'),
+            'ip_address': row['ip_address'],
             'status_code': row['status_code'],
             'endpoint': row['endpoint'],
             'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
@@ -285,7 +285,7 @@ class AnomalyDetector:
         ]
         return [{
             'type': 'Suspicious HTTP Method',
-            'ip': row.get('ip', 'Unknown'),
+            'ip_address': row['ip_address'],
             'method': row['method'],
             'endpoint': row['endpoint'],
             'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
@@ -306,7 +306,7 @@ class AnomalyDetector:
         ]
         return [{
             'type': 'Unusual User Agent',
-            'ip': row.get('ip', 'Unknown'),
+            'ip_address': row['ip_address'],
             'user_agent': row['user_agent'],
             'endpoint': row['endpoint'],
             'timestamp': row['timestamp'].isoformat() if pd.notna(row['timestamp']) else 'Unknown'
@@ -322,11 +322,11 @@ class AnomalyDetector:
         if self.logs_df is None:
             self.parse_logs() if self.log_file_path else None
         
-        ip_request_counts = self.logs_df['ip'].value_counts()
+        ip_request_counts = self.logs_df['ip_address'].value_counts()
         high_traffic_ips = ip_request_counts[ip_request_counts > self.config['max_requests_per_ip']]
         return [{
             'type': 'High Request Rate',
-            'ip': ip,
+            'ip_address': ip,
             'request_count': int(count),
             'max_allowed_requests': self.config['max_requests_per_ip']
         } for ip, count in high_traffic_ips.items()]
@@ -382,11 +382,12 @@ class AnomalyDetector:
     def detect_log_anomalies(self):
         """
         Comprehensive log anomaly detection combining Spark and Pandas methods.
-        
-        Returns:
-        dict: Dictionary containing anomalies detected by Spark and Pandas methods.
         """
         try:
+            # If df is a Spark DataFrame, convert to Pandas
+            if hasattr(self.df, 'toPandas'):
+                self.logs_df = self.df.toPandas()
+            
             if self.logs_df is None:
                 raise ValueError("No log data available for analysis")
             
@@ -398,12 +399,6 @@ class AnomalyDetector:
                 'performance_anomalies': self.detect_performance_anomalies(),
                 'security_anomalies': self.detect_security_anomalies(),
             }
-            
-            if hasattr(self.df, 'toPandas'):
-                anomalies.update({
-                    'z_score_anomalies': self.z_score_detection().toPandas().to_dict(orient='records'),
-                    'time_series_anomalies': self.time_series_anomaly_detection().toPandas().to_dict(orient='records')
-                })
             
             return anomalies
         except Exception as e:
