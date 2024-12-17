@@ -15,3 +15,10 @@ server-analysis-env/
 # geo lite information
 GeoLite_data/
 GeoLite_data/GeoLite2-City.mmdb
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore log files
+kafka_producer.log
+main_processing.log
